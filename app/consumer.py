@@ -1,0 +1,85 @@
+import json
+import logging
+
+import httpx
+from confluent_kafka import Consumer, KafkaError
+from pydantic import ValidationError
+
+from app.config import settings
+from app.contracts import PdfRequest
+from app.renderer import render_tour_pdf
+from app.storage import storage
+
+log = logging.getLogger(__name__)
+
+
+def send_webhook(
+        request_id: str, status: str, url: str | None = None, reason: str | None = None
+):
+    try:
+        payload = {"request_id": request_id, "status": status, "url": url, "reason": reason}
+        httpx.post(f"{settings.pdf_gateway}/api/pdf/internal/pdf-ready", json=payload, timeout=5.0)
+    except Exception as e:
+        log.error("Webhook failed: %s", e)
+
+
+def run():
+    consumer = Consumer({
+        "bootstrap.servers": settings.kafka_bootstrap_servers,
+        "group.id": settings.kafka_group_id,
+        "auto.offset.reset": "earliest",
+        "enable.auto.commit": False,
+    })
+    consumer.subscribe([settings.kafka_input_topic])
+    log.info("Worker started, listening to Kafka.")
+
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                log.error("Kafka error: %s", msg.error())
+                continue
+
+            raw = msg.value()
+            try:
+                data = json.loads(raw.decode("utf-8"))
+                request = PdfRequest(**data)
+            except (json.JSONDecodeError, ValidationError) as e:
+                log.error("Invalid message -> skip: %s", e)
+                consumer.commit(message=msg)
+                continue
+
+            key = f"{request.request_id}.pdf"
+            if storage.exists(key):
+                log.info("PDF %s already exists, skip", request.request_id)
+                send_webhook(
+                    request_id=request.request_id,
+                    status="ready",
+                    url=f"{settings.s3_endpoint_url}/{settings.s3_bucket}/{key}"
+                )
+                consumer.commit(message=msg)
+                continue
+
+            try:
+                pdf_bytes = render_tour_pdf(request.payload)
+                storage.save(key, pdf_bytes)
+                gateway_url = settings.pdf_gateway
+                url = f"{settings.pdf_gateway}/api/pdf/download/{request.request_id}"
+                log.info("PDF ready: %s", request.request_id)
+                send_webhook(request_id=request.request_id, status="ready", url=url)
+                consumer.commit(message=msg)
+            except Exception as e:
+                log.exception("Render failed: %s", e)
+                send_webhook(request.request_id, status="failed", reason=str(e))
+                consumer.commit(message=msg)
+    finally:
+        consumer.close()
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    run()
