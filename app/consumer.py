@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from datetime import datetime
 
 import httpx
 from confluent_kafka import Consumer, KafkaError
@@ -12,13 +14,19 @@ from app.storage import storage
 
 log = logging.getLogger(__name__)
 
+logging.getLogger("weasyprint").setLevel(logging.WARNING)
+logging.getLogger("fontTools").setLevel(logging.WARNING)
+logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
+
+http_client = httpx.Client(base_url="http://localhost:8000", timeout=5.0)
+
 
 def send_webhook(
         request_id: str, status: str, url: str | None = None, reason: str | None = None
 ):
     try:
         payload = {"request_id": request_id, "status": status, "url": url, "reason": reason}
-        httpx.post(f"{settings.pdf_gateway}/api/pdf/internal/pdf-ready", json=payload, timeout=5.0)
+        http_client.post("/api/pdf/internal/pdf-ready", json=payload)
     except Exception as e:
         log.error("Webhook failed: %s", e)
 
@@ -52,7 +60,8 @@ def run():
                 log.error("Invalid message -> skip: %s", e)
                 consumer.commit(message=msg)
                 continue
-
+            kafka_time = datetime.now()
+            log.info("TIMING. %s got from Kafka at %s", request.request_id, kafka_time.strftime("%H:%M:%S.%f"))
             key = f"{request.request_id}.pdf"
             if storage.exists(key):
                 log.info("PDF %s already exists, skip", request.request_id)
@@ -63,11 +72,17 @@ def run():
                 )
                 consumer.commit(message=msg)
                 continue
-
+            render_start = time.time()
             try:
                 pdf_bytes = render_tour_pdf(request.payload)
+                render_time = time.time() - render_start
+                save_start = time.time()
                 storage.save(key, pdf_bytes)
-                gateway_url = settings.pdf_gateway
+                save_time = time.time() - save_start
+                log.info(
+                    "TIMING. %s render %s, save %s",
+                    request.request_id, render_time, save_time
+                )
                 url = f"{settings.pdf_gateway}/api/pdf/download/{request.request_id}"
                 log.info("PDF ready: %s", request.request_id)
                 send_webhook(request_id=request.request_id, status="ready", url=url)
