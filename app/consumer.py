@@ -14,12 +14,14 @@ log = logging.getLogger(__name__)
 
 
 def run():
-    consumer = Consumer({
-        "bootstrap.servers": settings.kafka_bootstrap_servers,
-        "group.id": settings.kafka_group_id,
-        "auto.offset.reset": "earliest",
-        "enable.auto.commit": False,
-    })
+    consumer = Consumer(
+        {
+            "bootstrap.servers": settings.kafka_bootstrap_servers,
+            "group.id": settings.kafka_group_id,
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,
+        }
+    )
     consumer.subscribe([settings.kafka_input_topic])
     log.info("Worker started, listening to Kafka.")
 
@@ -43,7 +45,9 @@ def run():
                 consumer.commit(message=msg)
                 continue
             kafka_time = datetime.now()
-            log.info(f"TIMING: [{request.request_id}] Получено из Kafka в {kafka_time.strftime('%H:%M:%S.%f')}")
+            log.info(
+                f"TIMING: [{request.request_id}] Получено из Kafka в {kafka_time.strftime('%H:%M:%S.%f')}"
+            )
             db = SessionLocal()
             try:
                 process_message(db, request)
@@ -55,5 +59,7 @@ def run():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     run()

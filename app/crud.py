@@ -1,7 +1,9 @@
-from sqlalchemy.orm import Session
 from datetime import datetime
-from app.models import UserPDFHistory
+
+from sqlalchemy.orm import Session
+
 from app.contracts import PdfRequest
+from app.models import UserPDFHistory
 
 
 def save_pdf_history(db: Session, request: PdfRequest, pdf_bytes: bytes) -> None:
@@ -16,7 +18,7 @@ def save_pdf_history(db: Session, request: PdfRequest, pdf_bytes: bytes) -> None
         date_to=payload.dates.date_to,
         activity=", ".join(payload.activity),
         file_data=pdf_bytes,
-        created_at=datetime.now()
+        created_at=datetime.now(),
     )
     db.add(record)
     db.commit()

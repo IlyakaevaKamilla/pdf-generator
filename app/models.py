@@ -1,13 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import (
-    Date,
-    DateTime,
-    String,
-    func,
-    LargeBinary,
-    Index
-)
+from sqlalchemy import Date, DateTime, Index, LargeBinary, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -34,6 +27,11 @@ class UserPDFHistory(Base):
     __table_args__ = (
         Index(
             "idx_user_history_filter",
-            "user_id", "from_place", "to_place", "date_from", "date_to", "activity"
+            "user_id",
+            "from_place",
+            "to_place",
+            "date_from",
+            "date_to",
+            "activity",
         ),
     )
